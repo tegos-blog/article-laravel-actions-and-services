@@ -2,7 +2,7 @@ Laravel gives you a lot of freedom about where business logic goes. You can drop
 
 In my projects I keep this under control with two layers: **Actions** and **Services**. This is an opinionated guideline based on how my team works, not a universal rule. Actions borrow the spirit of the [Command pattern](https://refactoring.guru/design-patterns/command), without the undo or queue machinery. And no, this is not DDD. It is just a practical way to organize business logic in Laravel.
 
-Joel Clermont makes the same point in [_Where should you put your business logic?_](https://masteringlaravel.io/daily/2025-05-21-where-should-you-put-your-business-logic), and Nuno Maduro leans on Actions in [_Laravel Actions: The Secret Sauce_](https://youtu.be/r1480BoFulQ). The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
+Joel Clermont makes the same point in [_Where should you put your business logic?_](https://masteringlaravel.io/daily/2025-05-21-where-should-you-put-your-business-logic), and Nuno Maduro has called Actions "the use-case pattern in Laravel" in multiple public posts. Maduro's framing covers the Action side specifically; the two-layer split and the dispatch invariant are extensions from my own team's practice. The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
 
 ## The one rule that decides Action or Service
 
@@ -20,6 +20,10 @@ The normal wiring is `controller -> Action -> Services`. Read it left to right a
 
 There is exactly one hard invariant here, and it is the one most "Actions vs Services" posts skip: **a Service never calls an Action, and never dispatches a job or event.** Services do work; they do not start workflows. In my main codebase that holds across every Service, no exceptions. If you find yourself wanting to dispatch a job from a Service, that work belongs in an Action.
 
+The practical reason: a unit test of a Service that dispatches a job now carries queue side effects. The boundary breaks. Return a value from the Service; let the Action decide what to dispatch next.
+
+This covers domain events and jobs that kick off downstream workflows. Framework-level lifecycle events - model observers, Eloquent events fired inside a model - are a separate concern and may live wherever they make sense for the app.
+
 ## Quick check
 
 Still unsure where a class goes? Run it through these:
@@ -28,8 +32,9 @@ Still unsure where a class goes? Run it through these:
 2. Is it a calculation or transformation other code asks for? Service. Example: `DeliveryScheduleService`.
 3. Does it dispatch a job or event, send notifications, or own the database transaction? Action. Example: `PasswordRequestPhoneAction`.
 4. Does it wrap a single external call (one API, one reader)? Service. Example: `SupplierApi`.
+5. Does it only read data and return a result with no side effects? That is a Query Object, not an Action. Put it in `app/Queries/` and name it after the business question, not the database verb: `OrderCartItemsQuery` rather than `OrderCartItemDTOsFetchAction`.
 
-Notice what is not on the list: "does it have side effects" and "is it reusable." Both are misleading, and the next section explains why.
+Notice what is not on the list: "is it reusable." Reusability is a nice property, not a deciding factor - sub-Actions get reused too. And "does it have side effects" is intentionally absent - Services do IO all the time, and the next section explains why that is fine.
 
 ## The purity myth
 
@@ -54,7 +59,7 @@ An Action wraps one complete operation with a clear start and end. Create an ord
 A few conventions I stick to:
 
 - One operation per Action. If it is doing three unrelated things, it is three Actions.
-- Name it `[Domain][Object][Verb]Action`: `OrderCreateAction`, `OrderItemCancelAction`, `SearchQueryTrackLogAction`. Nabil Hassen makes the case for consistent naming in [_Action Pattern in Laravel_](https://nabilhassen.com/action-pattern-in-laravel-concept-benefits-best-practices).
+- Name it `[Domain][Object][Verb]Action`: `OrderCreateAction`, `OrderItemCancelAction`, `SearchQueryLogAction`. Nabil Hassen makes the case for consistent naming in [_Action Pattern in Laravel_](https://nabilhassen.com/action-pattern-in-laravel-concept-benefits-best-practices). Note: the community majority uses verb-first (`CreateOrderAction`). Domain-first has one practical upside - in a directory with 30+ Action files, all order-related classes sort together alphabetically. Pick one convention and commit to it.
 - Put it in `app/Actions/[Domain]`, for example `app/Actions/Order`.
 - Tag it with the `Actionable` marker interface. It declares no methods. It just labels the class as an Action and documents the `handle()` entry point for the IDE. Nothing enforces the signature at compile time, the convention does.
 
@@ -104,16 +109,17 @@ final readonly class OrderCreateAction implements Actionable
 }
 ```
 
-Notice `final readonly class ... implements Actionable`. The `readonly` keyword fits because the Action holds only injected dependencies and no mutable state. That is the default shape for both Actions and stateless Services.
+Notice `final readonly class ... implements Actionable`. The `readonly` keyword fits because the Action holds only injected dependencies and no mutable state. That is the default shape for both Actions and stateless Services. For Services that hold mutable state - a cache toggle, a log buffer - use plain `final class` instead.
 
 What I do inside an Action:
 
 - Inject everything through the constructor: repositories, Services, and sub-Actions.
 - Own the transaction here. Wrap the write path in `DB::transaction()` so a half-finished order never lands. Nuno Maduro covers this in [_Actions in Laravel Cloud_](https://youtube.com/shorts/wD1DAeRQ778).
+- Use `handle()` as the entry point. Spatie's convention uses `execute()` instead, specifically to avoid a double-injection edge case when an Action is injected into a job's own `handle()` method. Either works; `handle()` is our team default.
 - Let business exceptions bubble up. The Action throws; a global handler turns it into a clean response (more on that below).
 - Return the affected resource, or nothing.
 
-The composition is the nice part. `OrderCreateAction` leans on a sub-Action like `OrderCartItemDTOsFetchAction` to assemble its cart item DTOs, and a Repository to persist. Small, testable units instead of one giant method.
+The composition is the nice part. `OrderCreateAction` leans on a Query Object like `OrderCartItemsQuery` to assemble its cart item DTOs, and a Repository to persist. Small, testable units instead of one giant method. A class that only reads data and returns a result belongs in `app/Queries/`, not `app/Actions/` - the folder name carries the read/write signal so future readers do not have to infer it from the class name.
 
 Here is a step I got wrong at first. I had an `OrderItemNotificationAction` doing that notification write. It only wrote rows, and nothing triggered it on its own, so it was never really an operation. It was data access wearing an Action suffix. I moved it into `OrderItemNotificationRepository`. The actual sending of those notifications lives somewhere else: a scheduled command, `OrderItemNotificationSendCommand`, which is its own entry point. Writing the rows is a Repository. Sending them is triggered by a command. One Action had quietly merged two different jobs, and the direction rule is what pulled them back apart.
 
@@ -167,7 +173,7 @@ Actions can call sub-Actions and Services to build a workflow. The direction is 
 - Services may call other Services only.
 - Services never call Actions.
 
-For example, `OrderCreateAction` pulls in `OrderCartItemDTOsFetchAction` to assemble its cart item DTOs and `OrderConditionService` to price them, then writes notification rows through `OrderItemNotificationRepository`. One transaction per Action, no deep chains.
+For example, `OrderCreateAction` pulls in `OrderCartItemsQuery` to assemble its cart item DTOs and `OrderConditionService` to price them, then writes notification rows through `OrderItemNotificationRepository`. One transaction per Action, no deep chains.
 
 When an Action starts doing too much, split by operation. Instead of an overloaded `OrderProcessAction`, you get `OrderCreateAction`, `OrderPaymentProcessAction`, and `OrderInventoryUpdateAction`, each with one job. Do not go the other way and spawn an Action for every trivial task; use them for operations that mean something.
 
@@ -249,7 +255,7 @@ It is opinionated and it is not DDD. It is a pragmatic setup that has kept my La
 {% details TL;DR %}
 
 - **Direction decides it.** Outside code triggers the whole operation: Action. Other code calls in for one piece of work: Service. Wiring is `controller -> Action -> Services`.
-- **Actions** are entry points with a `handle()` method. They own the transaction, dispatch jobs and events, and orchestrate Services and sub-Actions. Shape: `final readonly class X implements Actionable`.
+- **Actions** are entry points with a `handle()` method. They own the transaction, may dispatch jobs and events, and orchestrate Services and sub-Actions. Shape: `final readonly class X implements Actionable`.
 - **Services** do one focused job: calculate, validate, transform, or wrap one external call. Prefer stateless, but IO-heavy Services (API clients, validators that query) are fine.
 - **The hard rule:** a Service never calls an Action and never dispatches a job or event.
 - **Naming:** `[Domain][Object][Verb]Action`, `[Domain][Purpose]Service`. Keep controllers thin; pass DTOs, not arrays.
