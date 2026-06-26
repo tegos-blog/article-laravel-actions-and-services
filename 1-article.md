@@ -32,7 +32,7 @@ Still unsure where a class goes? Run it through these:
 2. Is it a calculation or transformation other code asks for? Service. Example: `DeliveryScheduleService`.
 3. Does it dispatch a job or event, send notifications, or own the database transaction? Action. Example: `PasswordRequestPhoneAction`.
 4. Does it wrap a single external call (one API, one reader)? Service. Example: `SupplierApi`.
-5. Does it only read data and return a result with no side effects? That is a Query Object, not an Action. Put it in `app/Queries/` and name it after the business question, not the database verb: `OrderCartItemsQuery` rather than `OrderCartItemDTOsFetchAction`.
+5. Does it only read, assemble, or transform data - no transaction, no dispatch, no notifications? That is a Service collaborator, not an Action. Put it in `app/Services/` and name it after what it builds or does: `CartItemDtoFactory` rather than `OrderCartItemDTOsFetchAction`.
 
 Notice what is not on the list: "is it reusable." Reusability is a nice property, not a deciding factor - sub-Actions get reused too. And "does it have side effects" is intentionally absent - Services do IO all the time, and the next section explains why that is fine.
 
@@ -119,7 +119,7 @@ What I do inside an Action:
 - Let business exceptions bubble up. The Action throws; a global handler turns it into a clean response (more on that below).
 - Return the affected resource, or nothing.
 
-The composition is the nice part. `OrderCreateAction` leans on a Query Object like `OrderCartItemsQuery` to assemble its cart item DTOs, and a Repository to persist. Small, testable units instead of one giant method. A class that only reads data and returns a result belongs in `app/Queries/`, not `app/Actions/` - the folder name carries the read/write signal so future readers do not have to infer it from the class name.
+The composition is the nice part. `OrderCreateAction` leans on `CartItemDtoFactory` to assemble its cart item DTOs, and a Repository to persist. Small, testable units instead of one giant method. A class that only assembles or transforms data belongs in `app/Services/`, not `app/Actions/` - that boundary prevents Actions from quietly becoming data-access wrappers.
 
 Here is a step I got wrong at first. I had an `OrderItemNotificationAction` doing that notification write. It only wrote rows, and nothing triggered it on its own, so it was never really an operation. It was data access wearing an Action suffix. I moved it into `OrderItemNotificationRepository`. The actual sending of those notifications lives somewhere else: a scheduled command, `OrderItemNotificationSendCommand`, which is its own entry point. Writing the rows is a Repository. Sending them is triggered by a command. One Action had quietly merged two different jobs, and the direction rule is what pulled them back apart.
 
@@ -173,7 +173,7 @@ Actions can call sub-Actions and Services to build a workflow. The direction is 
 - Services may call other Services only.
 - Services never call Actions.
 
-For example, `OrderCreateAction` pulls in `OrderCartItemsQuery` to assemble its cart item DTOs and `OrderConditionService` to price them, then writes notification rows through `OrderItemNotificationRepository`. One transaction per Action, no deep chains.
+For example, `OrderCreateAction` pulls in `CartItemDtoFactory` to assemble its cart item DTOs and `OrderConditionService` to price them, then writes notification rows through `OrderItemNotificationRepository`. One transaction per Action, no deep chains.
 
 When an Action starts doing too much, split by operation. Instead of an overloaded `OrderProcessAction`, you get `OrderCreateAction`, `OrderPaymentProcessAction`, and `OrderInventoryUpdateAction`, each with one job. Do not go the other way and spawn an Action for every trivial task; use them for operations that mean something.
 
