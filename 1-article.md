@@ -121,7 +121,7 @@ What I do inside an Action:
 
 The composition is the nice part. `OrderCreateAction` leans on `CartItemDtoFactory` to assemble its cart item DTOs, and a Repository to persist. Small, testable units instead of one giant method. A class that only assembles or transforms data belongs in `app/Services/`, not `app/Actions/` - that boundary prevents Actions from quietly becoming data-access wrappers.
 
-Here is a step I got wrong at first. I had an `OrderItemNotificationAction` doing that notification write. It only wrote rows, and nothing triggered it on its own, so it was never really an operation. It was data access wearing an Action suffix. I moved it into `OrderItemNotificationRepository`. The actual sending of those notifications lives somewhere else: a scheduled command, `OrderItemNotificationSendCommand`, which is its own entry point. Writing the rows is a Repository. Sending them is triggered by a command. One Action had quietly merged two different jobs, and the direction rule is what pulled them back apart.
+Here is a step I got wrong at first. I had an `OrderItemNotificationAction` doing that notification write. It only wrote rows, and nothing triggered it on its own, so it was never really an operation. It was data access mislabeled as an Action. I moved it into `OrderItemNotificationRepository`. The actual sending of those notifications lives somewhere else: a scheduled command, `OrderItemNotificationSendCommand`, which is its own entry point. Writing the rows is a Repository. Sending them is triggered by a command. One Action had quietly merged two different jobs, and the direction rule is what pulled them back apart.
 
 ## Services
 
@@ -172,6 +172,8 @@ Actions can call sub-Actions and Services to build a workflow. The direction is 
 - Actions may call sub-Actions and Services.
 - Services may call other Services only.
 - Services never call Actions.
+
+But be strict about what earns the "sub-Action" label. A class is an Action only if it is an entry point in its own right (a controller, command, job, or event could call it), or it dispatches a job/event/notification, or it owns a transaction. A class that only filters, groups, transforms, validates, or reads - and is called only from inside another Action - is a Service mislabeled as an Action. We learned this on a search pipeline that carried `SearchBrandGroupingAction` and a stack of filter "Actions" that never dispatched, never owned a transaction, and were never called from anywhere but the orchestrating `SearchAction`. They were Services. Renaming them to `SearchBrandGroupingService`, `SearchAllowedSuppliersFilterService`, and friends made the search Action honest: it injects Services now, not fake sub-Actions.
 
 For example, `OrderCreateAction` pulls in `CartItemDtoFactory` to assemble its cart item DTOs and `OrderConditionService` to price them, then writes notification rows through `OrderItemNotificationRepository`. One transaction per Action, no deep chains.
 
