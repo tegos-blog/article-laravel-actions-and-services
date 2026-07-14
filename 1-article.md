@@ -2,7 +2,7 @@ Laravel gives you a lot of freedom about where business logic goes. You can drop
 
 In my projects I keep this under control with two layers: **Actions** and **Services**. This is an opinionated guideline based on how my team works, not a universal rule. Actions borrow the spirit of the [Command pattern](https://refactoring.guru/design-patterns/command), without the undo or queue machinery. And no, this is not DDD. It is just a practical way to organize business logic in Laravel.
 
-Joel Clermont makes the same point in [_Where should you put your business logic?_](https://masteringlaravel.io/daily/2025-05-21-where-should-you-put-your-business-logic), and Nuno Maduro has called Actions "the use-case pattern in Laravel" in multiple public posts. Maduro's framing covers the Action side specifically; the two-layer split and the dispatch invariant are extensions from my own team's practice. The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
+Nuno Maduro has called Actions "the use-case pattern in Laravel," and that is roughly the spirit here. The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
 
 ## The one rule that decides Action or Service
 
@@ -114,7 +114,7 @@ Notice `final readonly class ... implements Actionable`. The `readonly` keyword 
 What I do inside an Action:
 
 - Inject everything through the constructor: repositories, Services, and sub-Actions.
-- Own the transaction here. Wrap the write path in `DB::transaction()` so a half-finished order never lands. Nuno Maduro covers this in [_Actions in Laravel Cloud_](https://youtube.com/shorts/wD1DAeRQ778).
+- Own the transaction here. Wrap the write path in `DB::transaction()` so a half-finished order never lands. This short walks through the same idea: [_Action Design Pattern Explained_](https://youtube.com/shorts/wD1DAeRQ778).
 - Use `handle()` as the entry point. Spatie's convention uses `execute()` instead, specifically to avoid a double-injection edge case when an Action is injected into a job's own `handle()` method. Either works; `handle()` is our team default.
 - Let business exceptions bubble up. The Action throws; a global handler turns it into a clean response (more on that below).
 - Return the affected resource, or nothing.
