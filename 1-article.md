@@ -18,9 +18,13 @@ So:
 - Outside code triggers the whole operation, you are looking at an Action.
 - Other code reaches in mid-operation to get one thing done, that is a Service.
 
-The normal wiring is `controller -> Action -> Services`. Read it left to right and the layers fall out on their own.
+The normal wiring is `controller -> Action -> Services`. Read it in that order and the layers fall out on their own.
 
 There is exactly one hard invariant here, and it is the one most "Actions vs Services" posts skip: **a Service never calls an Action, and never dispatches a job or event.** Services do work; they do not start workflows. In my main codebase that holds across every Service, no exceptions. If you find yourself wanting to dispatch a job from a Service, that work belongs in an Action.
+
+![Call direction: every entry point calls into an Action; the Action calls down into Services and Repositories, and is the only layer that dispatches](https://raw.githubusercontent.com/tegos/laravel-action-and-service-guideline/refs/heads/main/assets/call-direction.png)
+
+*Calls run one way: any entry point into an Action, the Action down into Services and Repositories. Only the Action dispatches. Nothing calls back up. The Action usually owns the transaction, though a self-contained Service invoked top-level may own its own.*
 
 The reason is not testability - Laravel's `Queue::fake()` and `Event::fake()` make dispatching code easy to test. It is that orchestration stays legible when it lives in one layer: read an Action and you see the whole operation, including what it fires, while Services stay predictable because they only ever compute and return. So return a value from the Service and let the Action decide what to dispatch next.
 
