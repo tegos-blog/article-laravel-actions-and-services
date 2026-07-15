@@ -1,8 +1,10 @@
 Laravel gives you a lot of freedom about where business logic goes. You can drop it in a controller, a job, an event listener, a model. Nobody stops you. And that is exactly the problem: after a year of "nobody stops you," the order flow lives in four places and you are afraid to touch any of them.
 
+**TL;DR:** Direction decides the layer. Outside code triggers the whole operation -> **Action** (owns the transaction, has a `handle()`, may dispatch jobs). Other code calls in for one piece of work -> **Service** (calculate, validate, wrap one API; IO is fine). The one hard rule: **a Service never calls an Action and never dispatches a job or event.** Wiring is always `controller -> Action -> Services`.
+
 In my projects I keep this under control with two layers: **Actions** and **Services**. This is an opinionated guideline based on how my team works, not a universal rule. Actions borrow the spirit of the [Command pattern](https://refactoring.guru/design-patterns/command), without the undo or queue machinery. And no, this is not DDD. It is just a practical way to organize business logic in Laravel.
 
-Nuno Maduro has called Actions "the use-case pattern in Laravel," and that is roughly the spirit here. The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
+Nuno Maduro, who popularized the Action pattern in Laravel, frames Actions as use-case objects, and that is roughly the spirit here. The benefit that keeps me using this: an Action runs the same whether it is triggered from HTTP, an Artisan command, or a queued job. The entry point does not leak into the logic.
 
 ## The one rule that decides Action or Service
 
@@ -20,7 +22,7 @@ The normal wiring is `controller -> Action -> Services`. Read it left to right a
 
 There is exactly one hard invariant here, and it is the one most "Actions vs Services" posts skip: **a Service never calls an Action, and never dispatches a job or event.** Services do work; they do not start workflows. In my main codebase that holds across every Service, no exceptions. If you find yourself wanting to dispatch a job from a Service, that work belongs in an Action.
 
-The practical reason: a unit test of a Service that dispatches a job now carries queue side effects. The boundary breaks. Return a value from the Service; let the Action decide what to dispatch next.
+The reason is not testability - Laravel's `Queue::fake()` and `Event::fake()` make dispatching code easy to test. It is that orchestration stays legible when it lives in one layer: read an Action and you see the whole operation, including what it fires, while Services stay predictable because they only ever compute and return. So return a value from the Service and let the Action decide what to dispatch next.
 
 This covers domain events and jobs that kick off downstream workflows. Framework-level lifecycle events - model observers, Eloquent events fired inside a model - are a separate concern and may live wherever they make sense for the app.
 
@@ -252,7 +254,7 @@ This is not a tax you pay on every line. For a simple read or a minimal CRUD wri
 
 The payoff is consistency. Every operation looks the same: a controller hands a DTO to an Action's `handle()`, the Action orchestrates Services and sub-Actions inside one transaction, exceptions bubble to a global handler. New team members learn the shape once and then read the whole codebase. Future-you, three months out, does not have to reverse-engineer where the order logic lives.
 
-It is opinionated and it is not DDD. It is a pragmatic setup that has kept my Laravel projects readable as they grew.
+It is opinionated and it is not DDD. It is a pragmatic setup that has kept my Laravel projects readable as they grew. Laravel, after the happy path.
 
 {% details TL;DR %}
 
@@ -265,9 +267,16 @@ It is opinionated and it is not DDD. It is a pragmatic setup that has kept my La
 
 {% enddetails %}
 
+## Your turn
+
+Two things I know are contentious:
+
+1. I name Actions **domain-first** (`OrderCreateAction`); the community majority goes **verb-first** (`CreateOrderAction`). Which do you use, and why?
+2. My hard rule is that **a Service never dispatches a job or event.** Do you hold that line, or do you let Services fire events? Where does it break for you?
+
+Drop your setup in the comments - especially if you disagree.
+
 ## Author's Note
 
 Thanks for sticking around!
 Find me on [dev.to](https://dev.to/tegos), [linkedin](https://www.linkedin.com/in/ivan-mykhavko/), or you can check out my work on [github](https://github.com/tegos).
-
-**Laravel, after the happy path.**
