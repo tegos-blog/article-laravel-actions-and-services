@@ -22,7 +22,7 @@ The normal wiring is `controller -> Action -> Services`. Read it in that order a
 
 There is exactly one hard invariant here, and it is the one most "Actions vs Services" posts skip: **a Service never calls an Action, and never dispatches a job or event.** Services do work; they do not start workflows. In my main codebase that holds across every Service, no exceptions. If you find yourself wanting to dispatch a job from a Service, that work belongs in an Action.
 
-![Call direction: every entry point calls into an Action; the Action calls down into Services and Repositories, and is the only layer that dispatches](https://raw.githubusercontent.com/tegos/laravel-action-and-service-guideline/refs/heads/main/assets/call-direction.png)
+![Call direction: every entry point calls into an Action; the Action calls down into Services and Repositories, and is the only layer that dispatches](https://raw.githubusercontent.com/tegos/laravel-action-and-service-guideline/refs/heads/main/assets/call-direction.png?v=2)
 
 *Calls run one way: any entry point into an Action, the Action down into Services and Repositories. Only the Action dispatches. Nothing calls back up. The Action usually owns the transaction, though a self-contained Service invoked top-level may own its own.*
 
